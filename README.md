@@ -5,13 +5,13 @@ A [pi](https://github.com/badlogic/pi) coding agent extension that manages a tmu
 ## Install
 
 ```bash
-pi install npm:@indigoviolet/pi-tmux
+pi install npm:@romansix/pi-tmux
 ```
 
 Or try without installing:
 
 ```bash
-pi -e npm:@indigoviolet/pi-tmux
+pi -e npm:@romansix/pi-tmux
 ```
 
 ## Features

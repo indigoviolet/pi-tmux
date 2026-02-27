@@ -1,5 +1,5 @@
 {
-  "name": "@indigoviolet/pi-tmux",
+  "name": "@romansix/pi-tmux",
   "version": "1.0.0",
   "description": "Pi coding agent extension: tmux session management per project",
   "repository": {
