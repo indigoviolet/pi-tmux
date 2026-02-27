@@ -1,15 +1,21 @@
 {
   "name": "@romansix/pi-tmux",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Pi coding agent extension: tmux session management per project",
   "repository": {
     "type": "git",
     "url": "https://github.com/indigoviolet/pi-tmux.git"
   },
-  "keywords": ["pi-package", "pi-extension", "tmux"],
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "tmux"
+  ],
   "license": "Apache-2.0",
   "pi": {
-    "extensions": ["./extensions"]
+    "extensions": [
+      "./extensions"
+    ]
   },
   "dependencies": {
     "chokidar": "^4"
