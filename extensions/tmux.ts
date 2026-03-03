@@ -331,6 +331,8 @@ Actions:
 - list: List all windows in the session.
 - kill: Kill the entire session.
 
+COMPLETION NOTIFICATIONS: After using 'run', you do not need to poll or wait to find out when a command finishes. The session will automatically notify you with the exit code and recent output when the command completes — just move on to other work. You can still peek at any time to check intermediate output from a running process.
+
 The user can also type /tmux to attach in a new terminal tab, or /tmux:cat to select a window and bring its output into the conversation.`,
     parameters: TmuxParams,
 
