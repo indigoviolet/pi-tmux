@@ -23,7 +23,7 @@ import { watch as chokidarWatch, type FSWatcher } from "chokidar";
 const SIGNAL_BASE = "/tmp/pi-tmux";
 
 const TmuxParams = Type.Object({
-  action: StringEnum(["run", "attach", "peek", "kill", "list"] as const),
+  action: StringEnum(["run", "attach", "peek", "list", "kill", "mute"] as const),
   command: Type.Optional(
     Type.String({
       description: "Command to run (for 'run' action).",
@@ -337,7 +337,7 @@ export default function (pi: ExtensionAPI) {
 
     pi.sendMessage({
       customType: "tmux-silence",
-      content: `tmux window "${winName}" (:${winIdx}) has been silent for ${state.current}s — may be waiting for input.\n\n\`\`\`\n${trimmedOutput}\n\`\`\``,
+      content: `tmux window "${winName}" (:${winIdx}) has been silent for ${state.current}s — may be waiting for input. Use action "mute" with window ${winIdx} to suppress further silence notifications for this window.\n\n\`\`\`\n${trimmedOutput}\n\`\`\``,
       display: true,
     }, {
       triggerTurn: true,
@@ -492,6 +492,7 @@ Actions:
 - peek: Capture recent output from tmux windows. Use window param to target a specific window, or omit for all. Use this to check on running processes.
 - list: List all windows in the session.
 - kill: Kill the entire session.
+- mute: Suppress silence notifications for a window (requires window index). Use when a command is intentionally slow, not waiting for input.
 
 The user can also type /tmux to attach in a new terminal tab, or /tmux:cat to select a window and bring its output into the conversation.`,
     promptSnippet: "Manage a tmux session for the current project (one session per git root). Prefer this over bash for long-running or background commands.",
@@ -646,6 +647,47 @@ The user can also type /tmux to attach in a new terminal tab, or /tmux:cat to se
           exec(`tmux kill-session -t ${session}`);
           return {
             content: [{ type: "text", text: `Killed session ${session}.` }],
+          };
+        }
+
+        case "mute": {
+          const win = params.window;
+          if (win === undefined || win === "all") {
+            return {
+              content: [{ type: "text", text: "Error: 'window' (index) required for mute action." }],
+              isError: true,
+            };
+          }
+
+          const winIdx = typeof win === "number" ? win : parseInt(win);
+          if (isNaN(winIdx)) {
+            return {
+              content: [{ type: "text", text: `Error: invalid window index '${win}'.` }],
+              isError: true,
+            };
+          }
+
+          // Remove silence state for this window
+          let muted = false;
+          for (const key of silenceState.keys()) {
+            // Keys are "session.windowIndex.id"
+            const parsed = parseSignalFilename(key);
+            if (parsed && parsed.session === session && parsed.winIdx === winIdx) {
+              silenceState.delete(key);
+              muted = true;
+            }
+          }
+
+          // Disable tmux silence monitoring
+          execSafe(`tmux set-option -w -t ${session}:${winIdx} monitor-silence 0`);
+          execSafe(`tmux set-hook -uw -t ${session}:${winIdx} alert-silence`);
+
+          const windows = getWindows(session);
+          const w = windows.find((w) => w.index === winIdx);
+          const winName = w?.title ?? `window ${winIdx}`;
+
+          return {
+            content: [{ type: "text", text: `Muted silence notifications for "${winName}" (:${winIdx}).` }],
           };
         }
 
