@@ -51,7 +51,7 @@ const TmuxParams = Type.Object({
   ),
   window: Type.Optional(
     Type.Union([Type.Number(), Type.String()], {
-      description: "Window index or 'all' (for 'peek' action). Defaults to 'all'.",
+      description: "Window index (for 'attach', 'peek', or 'mute') or 'all' (for 'peek'). Defaults to 'all' for peek.",
     })
   ),
 });
@@ -103,6 +103,10 @@ function getWindows(name: string): { index: number; title: string; active: boole
   });
 }
 
+function formatWindowLines(windows: { index: number; title: string; active: boolean }[]): string[] {
+  return windows.map((w) => `  :${w.index}  ${w.title}${w.active ? "  (active)" : ""}`);
+}
+
 function capturePanes(name: string, window: number | "all"): string {
   const windows = getWindows(name);
   const targets =
@@ -118,14 +122,15 @@ function capturePanes(name: string, window: number | "all"): string {
     .join("\n\n");
 }
 
-function openTerminalTab(session: string): string {
+function openTerminalTab(session: string, window?: number): string {
+  const target = window === undefined ? session : `${session}:${window}`;
   const term = process.env.TERM_PROGRAM ?? "";
-  const attachCmd = `tmux attach -t ${session}`;
+  const attachCmd = `tmux attach -t ${target}`;
 
   // Already inside tmux — switch client instead of nesting
   if (process.env.TMUX) {
-    exec(`tmux switch-client -t ${session}`);
-    return `Switched tmux client to session ${session}.`;
+    exec(`tmux switch-client -t ${target}`);
+    return `Switched tmux client to ${target}.`;
   }
 
   switch (term) {
@@ -139,7 +144,7 @@ function openTerminalTab(session: string): string {
             end tell
           end tell
         end tell'`);
-      return `Opened iTerm2 tab attached to ${session}.`;
+      return `Opened iTerm2 tab attached to ${target}.`;
 
     case "Apple_Terminal":
       exec(`osascript -e '
@@ -147,36 +152,48 @@ function openTerminalTab(session: string): string {
           activate
           do script "${escapeForTmux(attachCmd)}"
         end tell'`);
-      return `Opened Terminal.app window attached to ${session}.`;
+      return `Opened Terminal.app window attached to ${target}.`;
 
     case "kitty":
       exec(`kitty @ launch --type=tab ${attachCmd}`);
-      return `Opened kitty tab attached to ${session}.`;
+      return `Opened kitty tab attached to ${target}.`;
 
     case "ghostty":
       exec(`ghostty -e ${attachCmd} &`);
-      return `Opened ghostty window attached to ${session}.`;
+      return `Opened ghostty window attached to ${target}.`;
 
     case "WezTerm":
       exec(`wezterm cli spawn -- ${attachCmd}`);
-      return `Opened WezTerm tab attached to ${session}.`;
+      return `Opened WezTerm tab attached to ${target}.`;
 
     default:
       return `No supported terminal detected. Run manually:\n  ${attachCmd}`;
   }
 }
 
-function attachToSession(cwd: string): string {
+function attachToSession(cwd: string, window?: number): string {
   const gitRoot = getGitRoot(cwd);
   if (!gitRoot) return "Not in a git repository.";
 
   const session = sessionName(gitRoot);
+  const target = window === undefined ? session : `${session}:${window}`;
   if (!sessionExists(session)) return `No tmux session for this project.`;
 
+  if (window !== undefined) {
+    const windows = getWindows(session);
+    const match = windows.find((w) => w.index === window);
+    if (!match) {
+      const available = formatWindowLines(windows);
+      return available.length > 0
+        ? `No tmux window :${window} in session ${session}.\nAvailable windows:\n${available.join("\n")}`
+        : `No tmux window :${window} in session ${session}.`;
+    }
+  }
+
   try {
-    return openTerminalTab(session);
+    return openTerminalTab(session, window);
   } catch (e: any) {
-    return `Failed: ${e.message}\nRun manually:\n  tmux attach -t ${session}`;
+    return `Failed: ${e.message}\nRun manually:\n  tmux attach -t ${target}`;
   }
 }
 
@@ -493,7 +510,7 @@ WHEN TO USE: Prefer this over bash for long-running or background commands: dev 
 
 Actions:
 - run: Run a command in a new tmux window. If the session already exists, a new window is added to it. When the command finishes, the agent is automatically notified with the exit code and recent output. Use silenceTimeout to get notified when the command may be waiting for input.
-- attach: Open a new terminal tab attached to the session (for the user to interact with). Supports iTerm2, Terminal.app, kitty, ghostty, WezTerm, and tmux nesting.
+- attach: Open a new terminal tab attached to the session (for the user to interact with). Pass window to target a specific window. Supports iTerm2, Terminal.app, kitty, ghostty, WezTerm, and tmux nesting.
 - peek: Capture recent output from tmux windows. Use window param to target a specific window, or omit for all. Use this to check on running processes.
 - list: List all windows in the session.
 - kill: Kill the entire session.
@@ -586,10 +603,33 @@ The user can also type /tmux to attach in a new terminal tab, or /tmux:cat to se
             };
           }
 
-          const msg = attachToSession(ctx.cwd);
-          const failed = msg.startsWith("Failed");
+          const win = params.window;
+          if (win === "all") {
+            return {
+              content: [{ type: "text", text: "Error: 'window' must be a numeric index for attach action." }],
+              isError: true,
+            };
+          }
+
+          const windowIndex =
+            win === undefined
+              ? undefined
+              : typeof win === "number"
+                ? win
+                : parseInt(win);
+
+          if (win !== undefined && isNaN(windowIndex as number)) {
+            return {
+              content: [{ type: "text", text: `Error: invalid window index '${win}'.` }],
+              isError: true,
+            };
+          }
+
+          const msg = attachToSession(ctx.cwd, windowIndex);
+          const failed = msg.startsWith("Failed") || msg.startsWith("No ");
           return {
             content: [{ type: "text", text: msg }],
+            details: { session, ...(windowIndex !== undefined && { windowIndex }) },
             ...(failed && { isError: true }),
           };
         }
@@ -628,9 +668,7 @@ The user can also type /tmux to attach in a new terminal tab, or /tmux:cat to se
           }
 
           const windows = getWindows(session);
-          const lines = windows.map(
-            (w) => `  :${w.index}  ${w.title}${w.active ? "  (active)" : ""}`
-          );
+          const lines = formatWindowLines(windows);
           return {
             content: [
               {
@@ -712,7 +750,7 @@ The user can also type /tmux to attach in a new terminal tab, or /tmux:cat to se
       if (action === "run" && args.command) {
         const label = args.name ? theme.fg("text", args.name + ": ") : "";
         text += "\n  " + label + theme.fg("muted", args.command);
-      } else if (action === "peek" && args.window !== undefined) {
+      } else if ((action === "attach" || action === "peek") && args.window !== undefined) {
         text += theme.fg("muted", ` :${args.window}`);
       }
 
