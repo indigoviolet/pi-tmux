@@ -280,6 +280,29 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
+  // Event API for cross-extension use (e.g. external-editor)
+  pi.events.on("pi-tmux:run-and-attach", ({ cwd, command, name, callback }: {
+    cwd: string;
+    command: string;
+    name?: string;
+    callback: (result: { windowIndex: number; attachMsg: string } | { error: string }) => void;
+  }) => {
+    try {
+      const gitRoot = getGitRoot(cwd);
+      if (!gitRoot) {
+        callback({ error: "Not in a git repository — tmux mode requires a git repo." });
+        return;
+      }
+      const session = sessionName(gitRoot);
+      ensureSession(session, gitRoot);
+      const winIdx = runInWindow(session, gitRoot, command, name);
+      const attachMsg = openTerminalTab(session, winIdx);
+      callback({ windowIndex: winIdx, attachMsg });
+    } catch (e: any) {
+      callback({ error: e.message ?? String(e) });
+    }
+  });
+
   // /tmux — attach in terminal
   pi.registerCommand("tmux", {
     description: "Open a terminal tab attached to this project's tmux session",
