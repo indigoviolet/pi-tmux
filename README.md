@@ -47,6 +47,31 @@ The notification includes a peek of the window output so the agent can decide wh
 - `/tmux:cat` — Select a tmux window and bring its output into the conversation
 - `/tmux:clear` — Kill idle tmux windows (shells with no running child processes)
 
+## Library usage
+
+The package exports reusable tmux utility functions from `tmux-utils` that other extensions can import:
+
+```typescript
+import {
+  getGitRoot,
+  sessionName,
+  ensureSession,
+  runInWindow,
+  openTerminalTab,
+} from "@romansix/pi-tmux/tmux-utils";
+
+// Ensure the project tmux session exists
+const gitRoot = getGitRoot(cwd);
+const session = sessionName(gitRoot);
+ensureSession(session, gitRoot);
+
+// Run a command in a new window and attach
+const winIdx = runInWindow(session, gitRoot, "vim foo.ts", "editor");
+openTerminalTab(session, winIdx);
+```
+
+Available exports: `exec`, `execSafe`, `escapeForTmux`, `getGitRoot`, `sessionName`, `sessionExists`, `ensureSession`, `getWindows`, `formatWindowLines`, `capturePanes`, `runInWindow`, `openTerminalTab`, `attachToSession`.
+
 ## Credits
 
 Inspired by [normful/picadillo's run-in-tmux skill](https://github.com/normful/picadillo/blob/main/skills/run-in-tmux/SKILL.md).

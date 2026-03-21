@@ -19,6 +19,20 @@ import { mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { watch as chokidarWatch, type FSWatcher } from "chokidar";
 
+import {
+  exec,
+  execSafe,
+  escapeForTmux,
+  getGitRoot,
+  sessionName,
+  sessionExists,
+  getWindows,
+  formatWindowLines,
+  capturePanes,
+  openTerminalTab,
+  attachToSession,
+} from "../tmux-utils.js";
+
 
 const SIGNAL_BASE = "/tmp/pi-tmux";
 
@@ -58,144 +72,7 @@ const TmuxParams = Type.Object({
 
 type TmuxInput = Static<typeof TmuxParams>;
 
-function exec(cmd: string): string {
-  return execSync(cmd, { encoding: "utf-8", timeout: 10000 }).trim();
-}
 
-function execSafe(cmd: string): string | null {
-  try {
-    return exec(cmd);
-  } catch {
-    return null;
-  }
-}
-
-function getGitRoot(cwd: string): string | null {
-  try {
-    return execSync("git rev-parse --show-toplevel", {
-      encoding: "utf-8",
-      cwd,
-      timeout: 5000,
-    }).trim();
-  } catch {
-    return null;
-  }
-}
-
-function sessionName(gitRoot: string): string {
-  const slug = gitRoot.split("/").pop()!.slice(0, 16).toLowerCase();
-  const hash = createHash("md5").update(gitRoot).digest("hex").slice(0, 8);
-  return `${slug}-${hash}`;
-}
-
-function sessionExists(name: string): boolean {
-  return execSafe(`tmux has-session -t ${name} 2>/dev/null && echo yes`) === "yes";
-}
-
-function getWindows(name: string): { index: number; title: string; active: boolean }[] {
-  const raw = execSafe(
-    `tmux list-windows -t ${name} -F "#{window_index}|||#{window_name}|||#{window_active}"`
-  );
-  if (!raw) return [];
-  return raw.split("\n").map((line) => {
-    const [index, title, active] = line.split("|||");
-    return { index: parseInt(index), title, active: active === "1" };
-  });
-}
-
-function formatWindowLines(windows: { index: number; title: string; active: boolean }[]): string[] {
-  return windows.map((w) => `  :${w.index}  ${w.title}${w.active ? "  (active)" : ""}`);
-}
-
-function capturePanes(name: string, window: number | "all"): string {
-  const windows = getWindows(name);
-  const targets =
-    window === "all" ? windows : windows.filter((w) => w.index === window);
-
-  if (targets.length === 0) return "No matching windows.";
-
-  return targets
-    .map((w) => {
-      const output = execSafe(`tmux capture-pane -t ${name}:${w.index} -p -S -50`);
-      return `── window ${w.index}: ${w.title} ──\n${output ?? "(empty)"}`;
-    })
-    .join("\n\n");
-}
-
-function openTerminalTab(session: string, window?: number): string {
-  const target = window === undefined ? session : `${session}:${window}`;
-  const term = process.env.TERM_PROGRAM ?? "";
-  const attachCmd = `tmux attach -t ${target}`;
-
-  // Already inside tmux — switch client instead of nesting
-  if (process.env.TMUX) {
-    exec(`tmux switch-client -t ${target}`);
-    return `Switched tmux client to ${target}.`;
-  }
-
-  switch (term) {
-    case "iTerm.app":
-      exec(`osascript -e '
-        tell application "iTerm2"
-          tell current window
-            set newTab to (create tab with default profile)
-            tell current session of newTab
-              write text "${escapeForTmux(attachCmd)}"
-            end tell
-          end tell
-        end tell'`);
-      return `Opened iTerm2 tab attached to ${target}.`;
-
-    case "Apple_Terminal":
-      exec(`osascript -e '
-        tell application "Terminal"
-          activate
-          do script "${escapeForTmux(attachCmd)}"
-        end tell'`);
-      return `Opened Terminal.app window attached to ${target}.`;
-
-    case "kitty":
-      exec(`kitty @ launch --type=tab ${attachCmd}`);
-      return `Opened kitty tab attached to ${target}.`;
-
-    case "ghostty":
-      exec(`ghostty -e ${attachCmd} &`);
-      return `Opened ghostty window attached to ${target}.`;
-
-    case "WezTerm":
-      exec(`wezterm cli spawn -- ${attachCmd}`);
-      return `Opened WezTerm tab attached to ${target}.`;
-
-    default:
-      return `No supported terminal detected. Run manually:\n  ${attachCmd}`;
-  }
-}
-
-function attachToSession(cwd: string, window?: number): string {
-  const gitRoot = getGitRoot(cwd);
-  if (!gitRoot) return "Not in a git repository.";
-
-  const session = sessionName(gitRoot);
-  const target = window === undefined ? session : `${session}:${window}`;
-  if (!sessionExists(session)) return `No tmux session for this project.`;
-
-  if (window !== undefined) {
-    const windows = getWindows(session);
-    const match = windows.find((w) => w.index === window);
-    if (!match) {
-      const available = formatWindowLines(windows);
-      return available.length > 0
-        ? `No tmux window :${window} in session ${session}.\nAvailable windows:\n${available.join("\n")}`
-        : `No tmux window :${window} in session ${session}.`;
-    }
-  }
-
-  try {
-    return openTerminalTab(session, window);
-  } catch (e: any) {
-    return `Failed: ${e.message}\nRun manually:\n  tmux attach -t ${target}`;
-  }
-}
 
 interface SilenceConfig {
   timeout: number;
@@ -244,10 +121,6 @@ function addWindow(signalDir: string, session: string, gitRoot: string, cmd: str
   const idx = parseInt(raw);
   const id = sendCommandWithSignal(signalDir, session, idx, cmd, silence);
   return { index: idx, id };
-}
-
-function escapeForTmux(s: string): string {
-  return s.replace(/"/g, '\\"');
 }
 
 export default function (pi: ExtensionAPI) {
