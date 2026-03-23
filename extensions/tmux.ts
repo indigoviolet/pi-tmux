@@ -26,9 +26,11 @@ import {
   getGitRoot,
   sessionName,
   sessionExists,
+  ensureSession,
   getWindows,
   formatWindowLines,
   capturePanes,
+  runInWindow,
   openTerminalTab,
   attachToSession,
 } from "../tmux-utils.js";
@@ -124,6 +126,9 @@ function addWindow(signalDir: string, session: string, gitRoot: string, cmd: str
 }
 
 export default function (pi: ExtensionAPI) {
+  const globalState = globalThis as typeof globalThis & {
+    __piTmuxRunAndAttachUnsubscribe?: (() => void) | undefined;
+  };
   // Each pi instance gets its own signal directory to avoid cross-talk.
   // Resolved lazily on first use (needs session_start to have fired).
   let SIGNAL_DIR: string | null = null;
@@ -281,7 +286,8 @@ export default function (pi: ExtensionAPI) {
   });
 
   // Event API for cross-extension use (e.g. external-editor)
-  pi.events.on("pi-tmux:run-and-attach", ({ cwd, command, name, callback }: {
+  globalState.__piTmuxRunAndAttachUnsubscribe?.();
+  globalState.__piTmuxRunAndAttachUnsubscribe = pi.events.on("pi-tmux:run-and-attach", ({ cwd, command, name, callback }: {
     cwd: string;
     command: string;
     name?: string;
