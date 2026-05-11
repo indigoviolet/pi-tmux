@@ -461,11 +461,11 @@ The user can also type /tmux to attach in a new terminal tab, or /tmux:cat to se
 
           if (!exists) {
             const winName = (params.name ?? params.command.split(/[|;&\s]/)[0].split("/").pop() ?? "shell").slice(0, 30);
-            exec(`tmux new-session -d -s ${session} -n "${escapeForTmux(winName)}" -c "${gitRoot}"`);
+            const raw = exec(`tmux new-session -d -s ${session} -n "${escapeForTmux(winName)}" -c "${gitRoot}" -P -F "#{window_index}"`);
+            windowIndex = parseInt(raw);
             // Enable silence alerts for all windows regardless of which is current
             exec(`tmux set-option -t ${session} silence-action any`);
-            windowId = sendCommandWithSignal(signalDir, session, 0, params.command, silence);
-            windowIndex = 0;
+            windowId = sendCommandWithSignal(signalDir, session, windowIndex, params.command, silence);
           } else {
             // Ensure silence-action is set even on pre-existing sessions
             if (silence) {
